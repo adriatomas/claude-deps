@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "claude-deps manifest",
+  "description": "Dependency manifest for Claude Code plugins, hooks, and MCP servers",
+  "type": "object",
+  "required": ["version"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Manifest schema version"
+    },
+    "plugins": {
+      "type": "object",
+      "description": "Plugin dependencies. Keys are plugin@marketplace, values are version strings.",
+      "additionalProperties": {
+        "type": "string",
+        "description": "Version string: exact (1.0.0), range (^1.0.0, ~1.0.0), or 'latest'"
+      }
+    },
+    "marketplaces": {
+      "type": "object",
+      "description": "Marketplace sources for resolving plugins",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["source"],
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": ["github", "git"],
+            "description": "Source type"
+          },
+          "repo": {
+            "type": "string",
+            "description": "GitHub repo in org/name format (required for github source)"
+          },
+          "url": {
+            "type": "string",
+            "description": "Git clone URL (required for git source)"
+          }
+        }
+      }
+    },
+    "mcp": {
+      "type": "object",
+      "properties": {
+        "servers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["type", "command"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["stdio", "http", "sse"]
+              },
+              "command": {
+                "type": "string"
+              },
+              "args": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": { "type": "string" }
+              },
+              "dependencies": {
+                "type": "object",
+                "properties": {
+                  "npm": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "pip": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "properties": {
+        "validate": {
+          "type": "boolean",
+          "description": "Whether to validate hook scripts exist"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://unpkg.com/claude-deps/schema.json",
+  "version": 1,
+  "plugins": {},
+  "marketplaces": {},
+  "hooks": {
+    "validate": true
+  }
+}
