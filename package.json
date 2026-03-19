@@ -1,6 +1,6 @@
 {
   "name": "claude-deps",
-  "version": "0.0.0-semantically-released",
+  "version": "1.0.0",
   "description": "Dependency manager for Claude Code — sync plugins, hooks, and MCP servers across your team",
   "type": "module",
   "main": "./dist/index.js",
