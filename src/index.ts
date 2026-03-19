@@ -5,6 +5,8 @@ export { check } from './lib/checker.js';
 export type { CheckResult } from './lib/checker.js';
 export { installMcpDependencies } from './lib/mcp.js';
 export { installHook, removeHook, validateHooks } from './lib/hooks.js';
+export { scan } from './lib/scanner.js';
+export type { ScannedPlugin, ScannedHook, ScannedMcpServer, ScanResult } from './lib/scanner.js';
 export type {
   Manifest,
   MarketplaceSource,
