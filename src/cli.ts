@@ -11,6 +11,7 @@ import { installMcpDependencies } from './lib/mcp.js';
 import { installHook, removeHook, validateHooks } from './lib/hooks.js';
 import { getProjectClaudeDir } from './lib/config.js';
 import { scan } from './lib/scanner.js';
+import * as ui from './lib/ui.js';
 import type { Manifest, LockFile, MarketplaceSource, McpServerConfig } from './lib/types.js';
 
 const program = new Command();
@@ -31,7 +32,10 @@ program
 
     mkdirSync(claudeDir, { recursive: true });
 
-    console.log('Scanning Claude Code configuration...\n');
+    ui.banner();
+    ui.info('Scanning Claude Code configuration...');
+    console.log();
+
     const scanResult = scan(projectPath);
 
     const selectedPlugins: Record<string, string> = {};
@@ -41,89 +45,109 @@ program
 
     // --- Plugins ---
     if (scanResult.plugins.length > 0) {
-      console.log(`Found ${scanResult.plugins.length} plugin(s):\n`);
+      ui.sectionHeader('Plugins', scanResult.plugins.length);
 
-      const pluginChoices = scanResult.plugins.map((p) => ({
-        name: `${p.id} (${p.version}) [${p.source}]${p.enabled ? '' : ' (disabled)'}`,
-        value: p.id,
-        checked: options.yes || p.enabled,
-      }));
-
-      let chosen: string[];
       if (options.yes) {
-        chosen = pluginChoices.filter((c) => c.checked).map((c) => c.value);
-        for (const id of chosen) {
-          console.log(`  + ${id}`);
+        const enabled = scanResult.plugins.filter((p) => p.enabled);
+        for (const p of enabled) {
+          ui.success(ui.pluginLabel(p.id, p.version, p.source, p.enabled));
+        }
+        for (const p of enabled) {
+          selectedPlugins[p.id] = p.version;
+          if (!selectedMarketplaces[p.marketplace]) {
+            selectedMarketplaces[p.marketplace] =
+              scanResult.marketplaces[p.marketplace] || inferMarketplaceSource(p.marketplace);
+          }
         }
       } else {
-        chosen = await checkbox({
-          message: 'Select plugins to include in the manifest:',
+        const pluginChoices = scanResult.plugins.map((p) => ({
+          name: ui.pluginLabel(p.id, p.version, p.source, p.enabled),
+          value: p.id,
+          checked: p.enabled,
+        }));
+
+        const chosen = await checkbox({
+          message: 'Select plugins to include:',
           choices: pluginChoices,
         });
-      }
 
-      for (const pluginId of chosen) {
-        const plugin = scanResult.plugins.find((p) => p.id === pluginId)!;
-        selectedPlugins[pluginId] = plugin.version;
-        if (!selectedMarketplaces[plugin.marketplace]) {
-          selectedMarketplaces[plugin.marketplace] =
-            scanResult.marketplaces[plugin.marketplace] ||
-            inferMarketplaceSource(plugin.marketplace);
+        for (const pluginId of chosen) {
+          const plugin = scanResult.plugins.find((p) => p.id === pluginId)!;
+          selectedPlugins[pluginId] = plugin.version;
+          if (!selectedMarketplaces[plugin.marketplace]) {
+            selectedMarketplaces[plugin.marketplace] =
+              scanResult.marketplaces[plugin.marketplace] ||
+              inferMarketplaceSource(plugin.marketplace);
+          }
         }
       }
-    } else {
-      console.log('No plugins found.\n');
+      console.log();
     }
 
     // --- Hooks ---
     if (scanResult.hooks.length > 0) {
-      console.log(`\nFound ${scanResult.hooks.length} hook(s):\n`);
+      ui.sectionHeader('Hooks', scanResult.hooks.length);
 
-      for (const hook of scanResult.hooks) {
-        const label = `[${hook.source}] ${hook.event}${hook.matcher !== '*' ? ` (${hook.matcher})` : ''}: ${truncate(hook.command, 60)}`;
-        console.log(`  ${label}`);
+      for (let i = 0; i < scanResult.hooks.length; i++) {
+        const hook = scanResult.hooks[i];
+        const label = ui.hookLabel(hook.event, hook.matcher, hook.command, hook.source);
+        if (i === scanResult.hooks.length - 1) {
+          ui.lastItem(label, 4);
+        } else {
+          ui.listItem(label, 4);
+        }
       }
+      console.log();
 
       if (!options.yes) {
         includeHookValidation = await confirm({
-          message: '\nEnable hook validation in the manifest?',
+          message: 'Enable hook validation?',
           default: true,
         });
       }
+      console.log();
     }
 
     // --- MCP Servers ---
     if (scanResult.mcpServers.length > 0) {
-      console.log(`\nFound ${scanResult.mcpServers.length} MCP server(s):\n`);
+      ui.sectionHeader('MCP Servers', scanResult.mcpServers.length);
 
-      const mcpChoices = scanResult.mcpServers.map((s) => ({
-        name: `${s.name} (${s.type}) [${s.source}] — ${s.command}`,
-        value: s.name,
-        checked: options.yes || s.source === 'project',
-      }));
-
-      let chosenMcp: string[];
       if (options.yes) {
-        chosenMcp = mcpChoices.filter((c) => c.checked).map((c) => c.value);
-        for (const name of chosenMcp) {
-          console.log(`  + ${name}`);
+        const projectServers = scanResult.mcpServers.filter((s) => s.source === 'project');
+        for (const s of projectServers) {
+          ui.success(ui.mcpLabel(s.name, s.type, s.command, s.source));
+        }
+        for (const s of projectServers) {
+          selectedMcp[s.name] = {
+            type: s.type as 'stdio' | 'http' | 'sse',
+            command: s.command,
+            ...(s.args?.length ? { args: s.args } : {}),
+            ...(s.env && Object.keys(s.env).length > 0 ? { env: s.env } : {}),
+          };
         }
       } else {
-        chosenMcp = await checkbox({
+        const mcpChoices = scanResult.mcpServers.map((s) => ({
+          name: ui.mcpLabel(s.name, s.type, s.command, s.source),
+          value: s.name,
+          checked: s.source === 'project',
+        }));
+
+        const chosenMcp = await checkbox({
           message: 'Select MCP servers to include:',
           choices: mcpChoices,
         });
-      }
 
-      for (const serverName of chosenMcp) {
-        const server = scanResult.mcpServers.find((s) => s.name === serverName)!;
-        selectedMcp[serverName] = {
-          type: server.type as 'stdio' | 'http' | 'sse',
-          command: server.command,
-          ...(server.args?.length ? { args: server.args } : {}),
-          ...(server.env && Object.keys(server.env).length > 0 ? { env: server.env } : {}),
-        };
+        for (const serverName of chosenMcp) {
+          const server = scanResult.mcpServers.find((s) => s.name === serverName)!;
+          selectedMcp[serverName] = {
+            type: server.type as 'stdio' | 'http' | 'sse',
+            command: server.command,
+            ...(server.args?.length ? { args: server.args } : {}),
+            ...(server.env && Object.keys(server.env).length > 0 ? { env: server.env } : {}),
+          };
+        }
       }
+      console.log();
     }
 
     // --- Build manifest ---
@@ -134,9 +158,7 @@ program
       ...(Object.keys(selectedMarketplaces).length > 0
         ? { marketplaces: selectedMarketplaces }
         : {}),
-      ...(Object.keys(selectedMcp).length > 0
-        ? { mcp: { servers: selectedMcp } }
-        : {}),
+      ...(Object.keys(selectedMcp).length > 0 ? { mcp: { servers: selectedMcp } } : {}),
       hooks: { validate: includeHookValidation },
     };
 
@@ -144,13 +166,18 @@ program
 
     const pluginCount = Object.keys(selectedPlugins).length;
     const mcpCount = Object.keys(selectedMcp).length;
-    console.log(
-      `\nCreated .claude/deps.json (${pluginCount} plugin(s), ${mcpCount} MCP server(s))`,
+
+    ui.divider();
+    console.log();
+    ui.success(
+      `Created ${ui.bold('.claude/deps.json')} ${ui.dim(`(${pluginCount} plugins, ${mcpCount} MCP servers)`)}`,
     );
-    console.log('Next steps:');
-    console.log('  npx claude-deps install       # Install everything');
-    console.log('  npx claude-deps hook install   # Add SessionStart guard');
-    console.log('  git add .claude/deps.json      # Commit to share with your team');
+
+    ui.nextSteps([
+      `${ui.cyan('npx claude-deps install')}     ${ui.dim('Install everything')}`,
+      `${ui.cyan('npx claude-deps hook install')} ${ui.dim('Add SessionStart guard')}`,
+      `${ui.cyan('git add .claude/deps.json')}    ${ui.dim('Commit to share with your team')}`,
+    ]);
   });
 
 // --- install ---
@@ -165,19 +192,21 @@ program
       plugins: {},
     };
 
+    ui.banner();
+
     let installedCount = 0;
 
     if (manifest.plugins && manifest.marketplaces) {
+      ui.sectionHeader('Installing plugins', Object.keys(manifest.plugins).length);
+
       for (const [pluginId, requestedVersion] of Object.entries(manifest.plugins)) {
         const { name, marketplace } = parsePluginId(pluginId);
         const marketplaceSource = manifest.marketplaces[marketplace];
 
         if (!marketplaceSource) {
-          console.error(`  Marketplace '${marketplace}' not defined for plugin '${pluginId}'`);
+          ui.error(`Marketplace '${marketplace}' not defined for ${ui.bold(pluginId)}`);
           continue;
         }
-
-        console.log(`  Installing ${pluginId}...`);
 
         try {
           const marketplacePath = ensureMarketplace(marketplace, marketplaceSource);
@@ -191,32 +220,39 @@ program
             marketplace,
           };
 
-          console.log(`  Installed ${pluginId}@${resolved.version}`);
+          ui.success(`${ui.bold(name)}${ui.dim(`@${marketplace}`)} ${ui.dim(resolved.version)}`);
           installedCount++;
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);
-          console.error(`  Failed ${pluginId}: ${message}`);
+          ui.error(`${ui.bold(name)}${ui.dim(`@${marketplace}`)} ${ui.red(message)}`);
         }
       }
+      console.log();
     }
 
     if (manifest.mcp) {
-      console.log('\n  Installing MCP dependencies...');
+      ui.sectionHeader('MCP dependencies');
       installMcpDependencies(manifest.mcp, projectPath);
+      console.log();
     }
 
     if (manifest.hooks?.validate) {
       const hookResult = validateHooks(projectPath);
       if (!hookResult.valid) {
-        console.log('\n  Hook issues:');
+        ui.sectionHeader('Hook issues');
         for (const issue of hookResult.issues) {
-          console.log(`    Warning: ${issue}`);
+          ui.warning(issue);
         }
+        console.log();
       }
     }
 
     writeLockfile(projectPath, lockfile);
-    console.log(`\nInstalled ${installedCount} plugin(s)`);
+
+    ui.divider();
+    console.log();
+    ui.success(`Installed ${ui.bold(String(installedCount))} plugin(s)`);
+    console.log();
   });
 
 // --- check ---
@@ -228,33 +264,38 @@ program
     const result = check(projectPath);
 
     if (result.ok && result.extra.length === 0) {
-      console.log('All dependencies are installed and up to date');
+      ui.success('All dependencies are installed and up to date');
       process.exit(0);
     }
 
     if (result.missing.length > 0) {
-      console.log('Missing plugins:');
+      console.log();
+      ui.sectionHeader('Missing', result.missing.length);
       for (const id of result.missing) {
-        console.log(`    - ${id}`);
+        ui.error(id);
       }
     }
 
     if (result.outdated.length > 0) {
-      console.log('Outdated plugins:');
+      console.log();
+      ui.sectionHeader('Outdated', result.outdated.length);
       for (const id of result.outdated) {
-        console.log(`    - ${id}`);
+        ui.warning(id);
       }
     }
 
     if (result.extra.length > 0) {
-      console.log('Extra plugins (not in manifest):');
+      console.log();
+      ui.sectionHeader('Extra (not in manifest)', result.extra.length);
       for (const id of result.extra) {
-        console.log(`    - ${id}`);
+        ui.info(id);
       }
     }
 
     if (result.missing.length > 0 || result.outdated.length > 0) {
-      console.log('\nRun: npx claude-deps install');
+      console.log();
+      ui.info(`Run ${ui.cyan('npx claude-deps install')} to fix`);
+      console.log();
       process.exit(1);
     }
   });
@@ -294,7 +335,7 @@ program
     };
     writeLockfile(projectPath, lockfile);
 
-    console.log(`Added ${plugin}@${resolved.version}`);
+    ui.success(`Added ${ui.bold(name)}${ui.dim(`@${marketplace}`)} ${ui.dim(resolved.version)}`);
   });
 
 // --- remove ---
@@ -306,7 +347,7 @@ program
     const manifest = readManifest(projectPath);
 
     if (!manifest.plugins?.[plugin]) {
-      console.error(`Plugin '${plugin}' not in deps.json`);
+      ui.error(`Plugin '${plugin}' not in deps.json`);
       process.exit(1);
     }
 
@@ -323,7 +364,7 @@ program
       writeLockfile(projectPath, lockfile);
     }
 
-    console.log(`Removed ${plugin}`);
+    ui.success(`Removed ${ui.bold(name)}${ui.dim(`@${marketplace}`)}`);
   });
 
 // --- update ---
@@ -336,9 +377,12 @@ program
     const lockfile: LockFile = { lockVersion: 1, plugins: {} };
 
     if (!manifest.plugins || !manifest.marketplaces) {
-      console.log('No plugins to update');
+      ui.info('No plugins to update');
       return;
     }
+
+    ui.banner();
+    ui.sectionHeader('Updating plugins');
 
     let updatedCount = 0;
 
@@ -360,16 +404,21 @@ program
           marketplace,
         };
 
-        console.log(`  Updated ${pluginId}@${resolved.version}`);
+        ui.success(`${ui.bold(name)}${ui.dim(`@${marketplace}`)} ${ui.dim(resolved.version)}`);
         updatedCount++;
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        console.error(`  Failed ${pluginId}: ${message}`);
+        ui.error(`${ui.bold(name)}${ui.dim(`@${marketplace}`)} ${ui.red(message)}`);
       }
     }
 
     writeLockfile(projectPath, lockfile);
-    console.log(`\nUpdated ${updatedCount} plugin(s)`);
+
+    console.log();
+    ui.divider();
+    console.log();
+    ui.success(`Updated ${ui.bold(String(updatedCount))} plugin(s)`);
+    console.log();
   });
 
 // --- hook ---
@@ -383,7 +432,7 @@ hookCmd
   .action(() => {
     const projectPath = resolve(process.cwd());
     installHook(projectPath);
-    console.log('SessionStart hook installed');
+    ui.success('SessionStart hook installed');
   });
 
 hookCmd
@@ -392,7 +441,7 @@ hookCmd
   .action(() => {
     const projectPath = resolve(process.cwd());
     removeHook(projectPath);
-    console.log('SessionStart hook removed');
+    ui.success('SessionStart hook removed');
   });
 
 // --- helpers ---
@@ -409,11 +458,6 @@ function inferMarketplaceSource(marketplace: string): {
   }
 
   return { source: 'github', repo: `${marketplace}/${marketplace}` };
-}
-
-function truncate(str: string, max: number): string {
-  if (str.length <= max) return str;
-  return str.substring(0, max - 3) + '...';
 }
 
 program.parse();

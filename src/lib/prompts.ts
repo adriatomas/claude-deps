@@ -1,25 +1,18 @@
-import { createInterface } from 'readline';
-
-const rl = () =>
-  createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-function ask(question: string): Promise<string> {
-  return new Promise((resolve) => {
-    const iface = rl();
-    iface.question(question, (answer) => {
-      iface.close();
-      resolve(answer.trim());
-    });
-  });
-}
+import { bold, cyan, dim, green, symbols } from './ui.js';
 
 export interface CheckboxChoice {
   name: string;
   value: string;
   checked?: boolean;
+}
+
+const HIDE_CURSOR = '\x1b[?25l';
+const SHOW_CURSOR = '\x1b[?25h';
+const CLEAR_LINE = '\x1b[2K';
+const MOVE_UP = (n: number) => `\x1b[${n}A`;
+
+function isInteractive(): boolean {
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
 export async function checkbox(options: {
@@ -28,58 +21,183 @@ export async function checkbox(options: {
 }): Promise<string[]> {
   const { message, choices } = options;
 
-  console.log(`\n${message}\n`);
-  for (let i = 0; i < choices.length; i++) {
-    const c = choices[i];
-    const marker = c.checked ? '[x]' : '[ ]';
-    console.log(`  ${i + 1}) ${marker} ${c.name}`);
+  if (!isInteractive()) {
+    return fallbackCheckbox(options);
   }
 
-  console.log(
-    '\nEnter numbers to toggle (e.g. "1 3 5"), "all" to select all, or press Enter to confirm:',
-  );
+  return new Promise((resolve) => {
+    let cursor = 0;
+    const selected = new Set(
+      choices.map((c, i) => (c.checked ? i : -1)).filter((i) => i >= 0),
+    );
 
-  const selected = new Set(
-    choices.map((c, i) => (c.checked ? i : -1)).filter((i) => i >= 0),
-  );
+    const render = (first = false) => {
+      // Move cursor up to overwrite previous render
+      if (!first) {
+        process.stdout.write(MOVE_UP(choices.length + 2));
+      }
 
-  const input = await ask('> ');
+      // Header
+      process.stdout.write(`${CLEAR_LINE}  ${cyan(symbols.info)} ${bold(message)}\n`);
+      process.stdout.write(
+        `${CLEAR_LINE}  ${dim(`  ${symbols.pointer} arrows to move, space to toggle, a to toggle all, enter to confirm`)}\n`,
+      );
 
-  if (input.toLowerCase() === 'all') {
-    return choices.map((c) => c.value);
-  }
+      // Choices
+      for (let i = 0; i < choices.length; i++) {
+        const isActive = i === cursor;
+        const isSelected = selected.has(i);
 
-  if (input === '') {
-    return choices
-      .filter((_, i) => selected.has(i))
-      .map((c) => c.value);
-  }
+        const pointer = isActive ? cyan(symbols.pointer) : ' ';
+        const check = isSelected
+          ? green(symbols.check)
+          : dim(symbols.radio_off);
+        const label = isActive ? choices[i].name : dim(choices[i].name);
 
-  const toggles = input
-    .split(/[\s,]+/)
-    .map((s) => parseInt(s, 10) - 1)
-    .filter((n) => n >= 0 && n < choices.length);
+        process.stdout.write(`${CLEAR_LINE}  ${pointer} ${check} ${label}\n`);
+      }
+    };
 
-  for (const idx of toggles) {
-    if (selected.has(idx)) {
-      selected.delete(idx);
-    } else {
-      selected.add(idx);
-    }
-  }
+    process.stdout.write(HIDE_CURSOR);
+    render(true);
 
-  return choices
-    .filter((_, i) => selected.has(i))
-    .map((c) => c.value);
+    const stdin = process.stdin;
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding('utf-8');
+
+    const onKey = (key: string) => {
+      // Ctrl+C
+      if (key === '\x03') {
+        cleanup();
+        process.stdout.write(SHOW_CURSOR);
+        process.exit(0);
+      }
+
+      // Enter
+      if (key === '\r' || key === '\n') {
+        cleanup();
+        process.stdout.write(SHOW_CURSOR);
+
+        const result = choices
+          .filter((_, i) => selected.has(i))
+          .map((c) => c.value);
+
+        // Show summary
+        const count = result.length;
+        process.stdout.write(MOVE_UP(choices.length + 2));
+        process.stdout.write(`${CLEAR_LINE}  ${green(symbols.check)} ${bold(message)} ${dim(`(${count} selected)`)}\n`);
+        for (let i = 0; i < choices.length + 1; i++) {
+          process.stdout.write(`${CLEAR_LINE}\n`);
+        }
+        // Move back up to clear blank lines
+        process.stdout.write(MOVE_UP(choices.length + 1));
+
+        resolve(result);
+        return;
+      }
+
+      // Space — toggle
+      if (key === ' ') {
+        if (selected.has(cursor)) {
+          selected.delete(cursor);
+        } else {
+          selected.add(cursor);
+        }
+        render();
+        return;
+      }
+
+      // 'a' — toggle all
+      if (key === 'a') {
+        const allSelected = selected.size === choices.length;
+        if (allSelected) {
+          selected.clear();
+        } else {
+          for (let i = 0; i < choices.length; i++) {
+            selected.add(i);
+          }
+        }
+        render();
+        return;
+      }
+
+      // Arrow up / k
+      if (key === '\x1b[A' || key === 'k') {
+        cursor = cursor > 0 ? cursor - 1 : choices.length - 1;
+        render();
+        return;
+      }
+
+      // Arrow down / j
+      if (key === '\x1b[B' || key === 'j') {
+        cursor = cursor < choices.length - 1 ? cursor + 1 : 0;
+        render();
+        return;
+      }
+    };
+
+    const cleanup = () => {
+      stdin.removeListener('data', onKey);
+      stdin.setRawMode(false);
+      stdin.pause();
+    };
+
+    stdin.on('data', onKey);
+  });
 }
 
 export async function confirm(options: {
   message: string;
   default?: boolean;
 }): Promise<boolean> {
-  const defaultHint = options.default !== false ? 'Y/n' : 'y/N';
-  const answer = await ask(`${options.message} (${defaultHint}) `);
+  if (!isInteractive()) {
+    return options.default !== false;
+  }
 
-  if (answer === '') return options.default !== false;
-  return answer.toLowerCase().startsWith('y');
+  return new Promise((resolve) => {
+    const defaultVal = options.default !== false;
+    const hint = defaultVal
+      ? `${bold('Y')}${dim('/')}${dim('n')}`
+      : `${dim('y')}${dim('/')}${bold('N')}`;
+
+    process.stdout.write(`  ${cyan(symbols.info)} ${bold(options.message)} ${hint} `);
+
+    const stdin = process.stdin;
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding('utf-8');
+
+    const onKey = (key: string) => {
+      stdin.removeListener('data', onKey);
+      stdin.setRawMode(false);
+      stdin.pause();
+
+      if (key === '\x03') {
+        process.stdout.write('\n' + SHOW_CURSOR);
+        process.exit(0);
+      }
+
+      let result: boolean;
+      if (key === '\r' || key === '\n') {
+        result = defaultVal;
+      } else {
+        result = key.toLowerCase() === 'y';
+      }
+
+      const label = result ? green('Yes') : dim('No');
+      process.stdout.write(`${label}\n`);
+      resolve(result);
+    };
+
+    stdin.on('data', onKey);
+  });
+}
+
+// Fallback for non-interactive (piped) environments
+async function fallbackCheckbox(options: {
+  message: string;
+  choices: CheckboxChoice[];
+}): Promise<string[]> {
+  return options.choices.filter((c) => c.checked).map((c) => c.value);
 }
