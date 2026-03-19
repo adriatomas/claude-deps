@@ -5,7 +5,7 @@ import { mkdirSync } from 'fs';
 import { checkbox, confirm } from './lib/prompts.js';
 import { readManifest, writeManifest, writeLockfile, readLockfile, parsePluginId } from './lib/manifest.js';
 import { ensureMarketplace, resolvePlugin } from './lib/resolver.js';
-import { installPlugin, uninstallPlugin } from './lib/installer.js';
+import { installPlugin, uninstallPlugin, cleanCache } from './lib/installer.js';
 import { check } from './lib/checker.js';
 import { installMcpDependencies } from './lib/mcp.js';
 import { installHook, removeHook, validateHooks } from './lib/hooks.js';
@@ -418,6 +418,35 @@ program
     ui.divider();
     console.log();
     ui.success(`Updated ${ui.bold(String(updatedCount))} plugin(s)`);
+    console.log();
+  });
+
+// --- clean ---
+program
+  .command('clean')
+  .description('Remove orphaned plugin versions from cache')
+  .option('--dry-run', 'Show what would be removed without deleting')
+  .action((options: { dryRun?: boolean }) => {
+    ui.banner();
+    ui.sectionHeader('Cleaning plugin cache');
+
+    if (options.dryRun) {
+      ui.info(ui.dim('Dry run — nothing will be deleted'));
+      console.log();
+    }
+
+    const result = cleanCache(options.dryRun);
+
+    if (result.removed.length === 0) {
+      ui.success('Cache is clean — no orphaned plugins');
+    } else {
+      for (const entry of result.removed) {
+        ui.success(`Removed ${ui.dim(entry)}`);
+      }
+      console.log();
+      const mb = (result.freedBytes / 1024 / 1024).toFixed(1);
+      ui.success(`Freed ${ui.bold(mb + ' MB')} from ${ui.bold(String(result.removed.length))} orphaned version(s)`);
+    }
     console.log();
   });
 

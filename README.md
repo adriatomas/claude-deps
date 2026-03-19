@@ -11,7 +11,7 @@ Claude Code plugins are installed per-user in `~/.claude/plugins/`. When a team 
 ## Quick Start
 
 ```bash
-# Initialize from your current setup
+# Initialize — scans your setup and lets you pick what to include
 npx claude-deps init
 
 # Install all declared dependencies
@@ -36,14 +36,29 @@ git commit -m "add claude-deps"
 
 | Command | Description |
 |---------|-------------|
-| `init` | Scan current project and create `deps.json` |
+| `init` | Scan current project and create `deps.json` (interactive) |
+| `init --yes` | Auto-accept all enabled plugins |
 | `install` | Install all dependencies from manifest |
 | `check` | Verify installed state matches manifest (exit 1 if not) |
 | `add <plugin@marketplace>` | Add a plugin and install it |
 | `remove <plugin@marketplace>` | Remove a plugin |
 | `update` | Update plugins to latest compatible versions |
+| `clean` | Remove orphaned plugin versions from cache |
+| `clean --dry-run` | Show what would be removed without deleting |
 | `hook install` | Add SessionStart verification hook |
 | `hook remove` | Remove the verification hook |
+
+## Interactive Init
+
+`claude-deps init` scans your entire Claude Code setup and presents an interactive selector:
+
+- **Plugins** — from project and user-level installations
+- **Hooks** — SessionStart, PreToolUse, PostToolUse from project and user settings
+- **MCP Servers** — from `.mcp.json` files
+
+Use arrow keys to navigate, space to toggle, `a` to select all, enter to confirm.
+
+Each item shows its source (`[project]` or `[user]`) so you know where it comes from.
 
 ## Manifest Format
 
@@ -109,6 +124,13 @@ git commit -m "add code-review plugin"
 # Teammates: git pull + npm install → auto-installed
 ```
 
+### Clean up old versions
+
+```bash
+npx claude-deps clean            # remove orphaned cached plugins
+npx claude-deps clean --dry-run  # preview what would be removed
+```
+
 ## Private / Corporate Marketplaces
 
 ```json
@@ -125,7 +147,7 @@ git commit -m "add code-review plugin"
 ## Using as a Library
 
 ```typescript
-import { check, installPlugin, readManifest } from 'claude-deps';
+import { check, readManifest, cleanCache } from 'claude-deps';
 
 const manifest = readManifest('/path/to/project');
 const result = check('/path/to/project');
@@ -133,6 +155,10 @@ const result = check('/path/to/project');
 if (!result.ok) {
   console.log('Missing:', result.missing);
 }
+
+// Clean orphaned cache entries
+const cleaned = cleanCache();
+console.log(`Freed ${cleaned.freedBytes} bytes`);
 ```
 
 ## CI Integration

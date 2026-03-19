@@ -1,6 +1,7 @@
 export { readManifest, writeManifest, readLockfile, writeLockfile, parsePluginId } from './lib/manifest.js';
 export { ensureMarketplace, resolvePlugin } from './lib/resolver.js';
-export { installPlugin, uninstallPlugin } from './lib/installer.js';
+export { installPlugin, uninstallPlugin, cleanCache } from './lib/installer.js';
+export type { CleanResult } from './lib/installer.js';
 export { check } from './lib/checker.js';
 export type { CheckResult } from './lib/checker.js';
 export { installMcpDependencies } from './lib/mcp.js';

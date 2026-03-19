@@ -1,7 +1,9 @@
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import {
   INSTALLED_PLUGINS_PATH,
   PLUGINS_DIR,
+  PLUGINS_CACHE,
   readInstalledPlugins,
   readProjectSettings,
   getProjectSettingsPath,
@@ -98,4 +100,80 @@ export function uninstallPlugin(
     const settingsPath = getProjectSettingsPath(projectPath);
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
   }
+}
+
+export interface CleanResult {
+  removed: string[];
+  freedBytes: number;
+}
+
+export function cleanCache(dryRun = false): CleanResult {
+  const installed = readInstalledPlugins();
+  const result: CleanResult = { removed: [], freedBytes: 0 };
+
+  if (!existsSync(PLUGINS_CACHE)) return result;
+
+  // Collect all referenced cache paths
+  const referencedPaths = new Set<string>();
+  for (const entries of Object.values(installed.plugins)) {
+    for (const entry of entries) {
+      referencedPaths.add(entry.installPath);
+    }
+  }
+
+  // Walk the cache: cache/<marketplace>/<plugin>/<version>/
+  const marketplaces = safeReaddir(PLUGINS_CACHE);
+  for (const marketplace of marketplaces) {
+    const marketplacePath = join(PLUGINS_CACHE, marketplace);
+    const plugins = safeReaddir(marketplacePath);
+    for (const plugin of plugins) {
+      const pluginPath = join(marketplacePath, plugin);
+      const versions = safeReaddir(pluginPath);
+      for (const version of versions) {
+        const versionPath = join(pluginPath, version);
+        if (!referencedPaths.has(versionPath)) {
+          const size = getDirSize(versionPath);
+          if (!dryRun) {
+            rmSync(versionPath, { recursive: true, force: true });
+          }
+          result.removed.push(`${marketplace}/${plugin}/${version}`);
+          result.freedBytes += size;
+        }
+      }
+      // Remove empty plugin dir
+      if (!dryRun && safeReaddir(pluginPath).length === 0) {
+        rmSync(pluginPath, { recursive: true, force: true });
+      }
+    }
+    // Remove empty marketplace dir
+    if (!dryRun && safeReaddir(marketplacePath).length === 0) {
+      rmSync(marketplacePath, { recursive: true, force: true });
+    }
+  }
+
+  return result;
+}
+
+function safeReaddir(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((f) => !f.startsWith('.'));
+}
+
+function getDirSize(dir: string): number {
+  if (!existsSync(dir)) return 0;
+  let size = 0;
+  const entries = readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      size += getDirSize(fullPath);
+    } else {
+      try {
+        size += statSync(fullPath).size;
+      } catch {
+        // skip unreadable files
+      }
+    }
+  }
+  return size;
 }
